@@ -3,7 +3,26 @@ maven-release-script
 
 This script provides similar functionality to the Maven release script, but works nicely with git.
 
-I created the script because to get the maven release plugin to work the way I wanted meant keeping a version of Maven 2.0 and not using concurrent builds; this was a huge pain.
+The script asks you for the version numbers if they are not provided and then:
+
+- builds the project with the "clean verify" target to make sure that tests pass
+- replaces the old dev version (most likely the snapshot version) with the release version (most likely the dev version without the -snapshot)
+- commits the release version
+- tags the commit with v${release version}
+- either 
+-- release branch does not exist
+--- creates the release branch
+--- pushes current master with the commit to the server
+-- release branch does exist
+--- pulls the latest version from the repo
+--- rebases the master onto the release branch
+- updates the version to the next development version (most likely the old dev version +1 minor and -snapshot)
+- pushes changes and tags
+
+
+As the script is supposed to be checked in along with your code it has a -u parameter that updates the script with the latest version from github.
+
+This is forked from the repo: petergeneric/maven-release-script
 
 Usage
 =====
@@ -19,5 +38,6 @@ Updates release version, then builds and commits it
   -c    Assume this as pom.xml version without inspecting it with xmllint
   -s    If provided, digitally signs the release before deploying it
 
+  -u    update the script from github
   -h    For this message
 ```

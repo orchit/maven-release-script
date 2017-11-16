@@ -1,4 +1,6 @@
 #!/bin/bash
+#update location for different forks!
+SCRIPT_LOCATION="https://github.com/orchit/maven-release-script/raw/master/release.sh"
 
 function die_with() {
 	echo "$*" >&2
@@ -20,7 +22,7 @@ function has_xmllint_with_xpath() {
 
 function die_unless_xmllint_has_xpath() {
 	has_command xmllint || die_with "Missing xmllint command, please install it (from libxml2)"
-	
+
 	has_xmllint_with_xpath || die_with "xmllint command is missing the --xpath option, please install the libxml2 version"
 }
 
@@ -34,16 +36,28 @@ function die_without_command() {
 
 function rollback_and_die_with() {
 	echo "$*" >&2
-	
+
 	echo "Resetting release commit to return you to the same working state as before attempting a deploy"
 	echo "> git reset --hard HEAD^1"
 	git reset --hard HEAD^1 || echo "Git reset command failed!"
-	
+
 	exit 1
 }
 
+function fetch_update(){
+    wget $SCRIPT_LOCATION -O "${0}.new"
+    RESULT=$?
+    if [ $RESULT -eq 0 ]; then
+        echo "Download succesful, replacing script"
+        mv "${0}.new" "$0"
+    else
+        echo "Download failed, please check $0.new"
+        exit 1
+    fi
+}
+
 function usage() {
-	echo "Maven git release script v1.0 (c) 2014 Peter Wright"
+	echo "Maven git release script v1.0 (c) 2014 Peter Wright (updated for orchit)"
 	echo ""
 	echo "Usage:"
 	echo "  $0 [-a | [ -r RELEASE_VERSION ] [ -n NEXT_DEV_VERSION ] ]  [ -c ASSUMED_POM_VERSION ] [ -s ]"
@@ -54,6 +68,7 @@ function usage() {
 	echo "  -n    Sets the next development version number to use (or 'auto' to increment release version)"
 	echo "  -c    Assume this as pom.xml version without inspecting it with xmllint"
 	echo ""
+	echo "  -u    update to latest version of this script fetched from $SCRIPT_LOCATION"
 	echo "  -h    For this message"
 	echo ""
 }
@@ -62,7 +77,7 @@ function usage() {
 # HANDLE COMMAND-LINE OPTIONS #
 ###############################
 
-while getopts "ahr:n:c:" o; do
+while getopts "auhr:n:c:" o; do
 	case "${o}" in
 		a)
 			RELEASE_VERSION="auto"
@@ -76,6 +91,10 @@ while getopts "ahr:n:c:" o; do
 			;;
 		c)
 			CURRENT_VERSION="${OPTARG}"
+			;;
+		u)
+		    fetch_update
+			exit 0
 			;;
 		h)
 			usage
@@ -117,6 +136,11 @@ else
 	echo "Good, no uncommitted changes found"
 fi
 
+#####################
+# update local repo #
+#####################
+
+git pull --rebase
 
 #################################################################
 # FIGURE OUT RELEASE VERSION NUMBER AND NEXT DEV VERSION NUMBER #
@@ -135,7 +159,7 @@ echo ""
 RELEASE_VERSION_DEFAULT=$(echo "$CURRENT_VERSION" | perl -pe 's/-SNAPSHOT//')
 if [ -z "$RELEASE_VERSION" ] ; then
 	read -p "Version to release [${RELEASE_VERSION_DEFAULT}]" RELEASE_VERSION
-		
+
 	if [ -z "$RELEASE_VERSION" ] ; then
 		RELEASE_VERSION=$RELEASE_VERSION_DEFAULT
 	fi
@@ -152,7 +176,7 @@ fi
 NEXT_VERSION_DEFAULT=$(echo "$RELEASE_VERSION" | perl -pe 's{^(([0-9]\.)+)?([0-9]+)$}{$1 . ($3 + 1)}e')
 if [ -z "$NEXT_VERSION" ] ; then
 	read -p "Next snapshot version [${NEXT_VERSION_DEFAULT}]" NEXT_VERSION
-	
+
 	if [ -z "$NEXT_VERSION" ] ; then
 		NEXT_VERSION=$NEXT_VERSION_DEFAULT
 	fi
@@ -190,23 +214,42 @@ $MVN versions:set -DgenerateBackupPoms=false -DnewVersion=$RELEASE_VERSION || di
 git commit -a -m "Release version ${RELEASE_VERSION}" || die_with "Failed to commit updated pom.xml versions for release!"
 
 echo ""
-echo " Starting build and deploy"
+echo " Starting build and verify"
 echo ""
 
 
 # build and deploy the release
-$MVN -DperformRelease=true clean deploy || rollback_and_die_with "Build/Deploy failure. Release failed."
+$MVN -DperformRelease=true clean verify || rollback_and_die_with "Build/Deploy failure. Release failed."
 
 # tag the release (N.B. should this be before perform the release?)
 git tag "v${RELEASE_VERSION}" || die_with "Failed to create tag ${RELEASE_VERSION}! Release has been deployed, however"
+
+git fetch --all
+git checkout release 2>/dev/null
+RESULT=$?
+if [ $RESULT -eq 0 ]; then
+    echo "Checked out release branch. Pulling latest changes..."
+    git pull --rebase
+    git rebase master && git push
+else
+    echo "checkout release branch. Creating new one"
+    git checkout -b release;
+    echo "Pushing branch to upstream"
+    git push -u origin release
+fi
+echo "Returning to master branch!"
+
+git checkout master
 
 ######################################
 # START THE NEXT DEVELOPMENT PROCESS #
 ######################################
 
-$MVN versions:set -DgenerateBackupPoms=false "-DnewVersion=${NEXT_VERSION}" || die_with "Failed to set next dev version on pom.xml files, please do this manually"
+$MVN versions:set -DgenerateBackupPoms=false "-DnewVersion=${NEXT_VERSION}" || die_with "Failed to set next dev version '${NEXT_VERSION}' on pom.xml files, please do this manually"
 
-git commit -a -m "Start next development version ${NEXT_VERSION}" || die_with "Failed to commit updated pom.xml versions for next dev version! Please do this manually"
+git commit -a -m "Start next development version ${NEXT_VERSION}" || die_with "Failed to commit updated pom.xml versions '${NEXT_VERSION}' for next dev version! Please do this manually"
 
 git push || die_with "Failed to push commits. Please do this manually"
 git push --tags || die_with "Failed to push tags. Please do this manually"
+
+echo "Release success"
