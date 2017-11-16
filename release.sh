@@ -51,7 +51,6 @@ function fetch_update(){
         echo "Download succesful, replacing script"
         mv "${0}.new" "$0"
         chmod 755 "$0"
-
     else
         echo "Download failed, please check $0.new"
         exit 1
